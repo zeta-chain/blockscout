@@ -129,6 +129,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
     Application.get_env(:indexer, __MODULE__)[:concurrency]
   end
 
+  # Getting block number, no need to add zevm blocks data
   defp fetch_last_block(json_rpc_named_arguments) do
     case latest_block() do
       nil ->
@@ -392,6 +393,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
           {:ok, [last_block()..(latest_block_number - 1)]}
         end
 
+      # Getting block ranges, no need to add zevm blocks data
       num ->
         with {:ok, latest_block_number} <-
                EthereumJSONRPC.fetch_block_number_by_tag("latest", json_rpc_named_arguments) do

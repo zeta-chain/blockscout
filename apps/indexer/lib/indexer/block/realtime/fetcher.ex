@@ -111,6 +111,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
      }}
   end
 
+  # Getting block number, no need to add zevm blocks data
   @impl GenServer
   def handle_info(
         :poll_latest_block_number,

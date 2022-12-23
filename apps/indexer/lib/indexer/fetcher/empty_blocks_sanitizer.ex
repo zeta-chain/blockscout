@@ -87,10 +87,19 @@ defmodule Indexer.Fetcher.EmptyBlocksSanitizer do
     unprocessed_empty_blocks_from_db
     |> Enum.with_index()
     |> Enum.each(fn {{block_number, block_hash}, ind} ->
-      with {:ok, %{"transactions" => transactions}} <-
-             %{id: ind, method: "eth_getBlockByNumber", params: [integer_to_quantity(block_number), false]}
-             |> request()
-             |> json_rpc(json_rpc_named_arguments) do
+      with {
+          {:ok, %{"transactions" => eth_transactions}},
+          {:ok, %{"transactions" => zevm_transactions}}
+        } <- {
+          %{id: ind, method: "eth_getBlockByNumber", params: [integer_to_quantity(block_number), false]}
+            |> request()
+            |> json_rpc(json_rpc_named_arguments),
+          %{id: ind, method: "zevm_getBlockByNumber", params: [integer_to_quantity(block_number), false]}
+            |> request()
+            |> json_rpc(json_rpc_named_arguments)
+          } do
+        transactions = eth_transactions ++ zevm_transactions
+
         transactions_count =
           transactions
           |> Enum.count()

@@ -27,6 +27,7 @@ defmodule Indexer.Transform.AddressCoinBalancesDaily do
           else
             json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
 
+            # Just getting timestamp, no need to use zevm_getBlockByNumber
             with {:ok, %{"timestamp" => timestamp_raw}} <-
                    %{id: 1, method: "eth_getBlockByNumber", params: [integer_to_quantity(block_number), false]}
                    |> request()

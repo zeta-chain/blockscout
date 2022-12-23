@@ -124,7 +124,7 @@ defmodule Indexer.Block.Fetcher do
     {fetch_time, fetched_blocks} =
       :timer.tc(fn -> EthereumJSONRPC.fetch_blocks_by_range(range, json_rpc_named_arguments) end)
 
-    with {:blocks,
+      {:ok, result_evm} = with {:blocks,
           {:ok,
            %Blocks{
              blocks_params: blocks_params,
@@ -182,18 +182,105 @@ defmodule Indexer.Block.Fetcher do
                tokens: %{on_conflict: :nothing, params: tokens},
                transactions: %{params: transactions_with_receipts}
              }
-           ) do
+    ) do
+        {:ok, %{inserted: inserted, errors: blocks_errors}}
+      else
+        {step, {:error, reason}} -> {:error, {step, reason}}
+        {:import, {:error, step, failed_value, changes_so_far}} -> {:error, {step, failed_value, changes_so_far}}
+      end
+
+    {_fetch_time, fetched_zevm_blocks} =
+      :timer.tc(fn -> EthereumJSONRPC.fetch_zevm_blocks_by_range(range, json_rpc_named_arguments) end)
+
+    {:ok, result_zevm} = with {:blocks,
+    {:ok,
+      %Blocks{
+        blocks_params: blocks_params,
+        transactions_params: transactions_params_without_receipts,
+        block_second_degree_relations_params: block_second_degree_relations_params,
+        errors: zevm_blocks_errors
+    }}
+      } <-
+      {:blocks, fetched_zevm_blocks},
+      blocks = TransformBlocks.transform_blocks(blocks_params),
+      {:receipts, {:ok, receipt_params}} <- {:receipts, Receipts.zevm_fetch(state, transactions_params_without_receipts)},
+      %{logs: logs, receipts: receipts} = receipt_params,
+      transactions_with_receipts = Receipts.put(transactions_params_without_receipts, receipts),
+      %{token_transfers: token_transfers, tokens: tokens} = TokenTransfers.parse(logs),
+      %{mint_transfers: mint_transfers} = MintTransfers.parse(logs),
+      %FetchedBeneficiaries{params_set: beneficiary_params_set, errors: beneficiaries_errors} =
+        fetch_beneficiaries(blocks, transactions_with_receipts, json_rpc_named_arguments),
+      addresses =
+        Addresses.extract_addresses(%{
+          block_reward_contract_beneficiaries: MapSet.to_list(beneficiary_params_set),
+          blocks: blocks,
+          logs: logs,
+          mint_transfers: mint_transfers,
+          token_transfers: token_transfers,
+          transactions: transactions_with_receipts
+        }),
+      coin_balances_params_set =
+        %{
+          beneficiary_params: MapSet.to_list(beneficiary_params_set),
+          blocks_params: blocks,
+          logs_params: logs,
+          transactions_params: transactions_with_receipts
+        }
+        |> AddressCoinBalances.params_set(),
+      coin_balances_params_daily_set =
+        %{
+          coin_balances_params: coin_balances_params_set,
+          blocks: blocks
+        }
+        |> AddressCoinBalancesDaily.params_set(),
+      beneficiaries_with_gas_payment =
+        beneficiaries_with_gas_payment(blocks, beneficiary_params_set, transactions_with_receipts),
+      address_token_balances = AddressTokenBalances.params_set(%{token_transfers_params: token_transfers}),
+      {:ok, zevm_inserted} <-
+        __MODULE__.import(
+          state,
+          %{
+            addresses: %{params: addresses},
+            address_coin_balances: %{params: coin_balances_params_set},
+            address_coin_balances_daily: %{params: coin_balances_params_daily_set},
+            address_token_balances: %{params: address_token_balances},
+            blocks: %{params: blocks},
+            block_second_degree_relations: %{params: block_second_degree_relations_params},
+            block_rewards: %{errors: beneficiaries_errors, params: beneficiaries_with_gas_payment},
+            logs: %{params: logs},
+            token_transfers: %{params: token_transfers},
+            tokens: %{on_conflict: :nothing, params: tokens},
+            transactions: %{params: transactions_with_receipts}
+          }
+    ) do
+        {:ok, %{inserted: zevm_inserted, errors: zevm_blocks_errors}}
+      else
+        {step, {:error, reason}} -> {:error, {step, reason}}
+        {:import, {:error, step, failed_value, changes_so_far}} -> {:error, {step, failed_value, changes_so_far}}
+      end
+
+
       Prometheus.Instrumenter.block_batch_fetch(fetch_time, callback_module)
-      result = {:ok, %{inserted: inserted, errors: blocks_errors}}
-      update_block_cache(inserted[:blocks])
-      update_transactions_cache(inserted[:transactions])
-      update_addresses_cache(inserted[:addresses])
-      update_uncles_cache(inserted[:block_second_degree_relations])
+      result = {:ok, %{inserted: %{
+        addresses: %{params: result_zevm[:inserted][:addresses] || [] ++ result_evm[:inserted][:addresses] || []},
+        address_coin_balances: %{params: result_zevm[:inserted][:address_coin_balances] || [] ++ result_evm[:inserted][:address_coin_balances] || []},
+        address_coin_balances_daily: %{params: result_zevm[:inserted][:address_coin_balances_daily] || [] ++ result_evm[:inserted][:address_coin_balances_daily] || []},
+        address_token_balances: %{params: result_zevm[:inserted][:address_token_balances] || [] ++ result_evm[:inserted][:address_token_balances]  || []},
+        blocks: %{params: result_evm[:inserted][:blocks]},
+        block_second_degree_relations: %{params: result_evm[:inserted][:block_second_degree_relations]},
+        block_rewards: %{params: result_evm[:inserted][:block_rewards]},
+        logs: %{params: result_zevm[:inserted][:logs] || [] ++ result_evm[:inserted][:logs] || []},
+        token_transfers: %{params: result_zevm[:inserted][:token_transfers] || [] ++ result_evm[:inserted][:token_transfers] || []},
+        tokens: %{params: result_zevm[:inserted][:tokens] || [] ++ result_evm[:inserted][:tokens] || []},
+        transactions: %{params: result_zevm[:inserted][:transactions] || [] ++ result_evm[:inserted][:transactions] || []}
+      }, errors: result_evm[:errors] || [] ++ result_zevm[:errors] || []}}
+
+      update_block_cache(elem(result, 1)[:blocks])
+      update_transactions_cache(elem(result, 1)[:transactions])
+      update_addresses_cache(elem(result, 1)[:addresses])
+      update_uncles_cache(elem(result, 1)[:block_second_degree_relations])
+
       result
-    else
-      {step, {:error, reason}} -> {:error, {step, reason}}
-      {:import, {:error, step, failed_value, changes_so_far}} -> {:error, {step, failed_value, changes_so_far}}
-    end
   end
 
   defp update_block_cache([]), do: :ok

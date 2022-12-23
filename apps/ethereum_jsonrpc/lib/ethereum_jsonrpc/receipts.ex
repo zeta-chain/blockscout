@@ -145,6 +145,39 @@ defmodule EthereumJSONRPC.Receipts do
     end
   end
 
+  @spec zevm_fetch(
+          [
+            %{
+              required(:gas) => non_neg_integer(),
+              required(:hash) => EthereumJSONRPC.hash(),
+              optional(atom) => any
+            }
+          ],
+          EthereumJSONRPC.json_rpc_named_arguments()
+        ) :: {:ok, %{logs: list(), receipts: list()}} | {:error, reason :: term()}
+  def zevm_fetch(transactions_params, json_rpc_named_arguments) when is_list(transactions_params) do
+    {requests, id_to_transaction_params} =
+      transactions_params
+      |> Stream.with_index()
+      |> Enum.reduce({[], %{}}, fn {%{hash: transaction_hash} = transaction_params, id},
+                                   {acc_requests, acc_id_to_transaction_params} ->
+        requests = [zevm_request(id, transaction_hash) | acc_requests]
+        id_to_transaction_params = Map.put(acc_id_to_transaction_params, id, transaction_params)
+        {requests, id_to_transaction_params}
+      end)
+
+    with {:ok, responses} <- json_rpc(requests, json_rpc_named_arguments),
+         {:ok, receipts} <- reduce_responses(responses, id_to_transaction_params) do
+      elixir_receipts = to_elixir(receipts)
+
+      elixir_logs = elixir_to_logs(elixir_receipts)
+      receipts = elixir_to_params(elixir_receipts)
+      logs = Logs.elixir_to_params(elixir_logs)
+
+      {:ok, %{logs: logs, receipts: receipts}}
+    end
+  end
+
   @doc """
   Converts stringly typed fields to native Elixir types.
 
@@ -215,6 +248,14 @@ defmodule EthereumJSONRPC.Receipts do
     request(%{
       id: id,
       method: "eth_getTransactionReceipt",
+      params: [transaction_hash]
+    })
+  end
+
+  defp zevm_request(id, transaction_hash) when is_integer(id) and is_binary(transaction_hash) do
+    request(%{
+      id: id,
+      method: "zevm_getTransactionReceipt",
       params: [transaction_hash]
     })
   end

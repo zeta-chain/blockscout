@@ -261,6 +261,16 @@ defmodule EthereumJSONRPC do
   end
 
   @doc """
+  Fetches zevm blocks by block number range.
+  """
+  @spec fetch_zevm_blocks_by_range(Range.t(), json_rpc_named_arguments) :: {:ok, Blocks.t()} | {:error, reason :: term}
+  def fetch_zevm_blocks_by_range(_first.._last = range, json_rpc_named_arguments) do
+    range
+    |> Enum.map(fn number -> %{number: number} end)
+    |> fetch_blocks_by_params(&Block.ZEvmByNumber.request/1, json_rpc_named_arguments)
+  end
+
+  @doc """
   Fetches uncle blocks by nephew hashes and indices.
   """
   @spec fetch_uncle_blocks([nephew_index()], json_rpc_named_arguments) :: {:ok, Blocks.t()} | {:error, reason :: term}
@@ -299,6 +309,25 @@ defmodule EthereumJSONRPC do
     |> Block.ByTag.request()
     |> json_rpc(json_rpc_named_arguments)
     |> Block.ByTag.number_from_result()
+  end
+
+  @doc """
+  Fetches zevm block number by `t:tag/0`.
+
+  ## Returns
+
+   * `{:ok, number}` - the block number for the given `tag`.
+   * `{:error, :invalid_tag}` - When `tag` is not a valid `t:tag/0`.
+   * `{:error, reason}` - other JSONRPC error.
+
+  """
+  @spec fetch_zevm_block_number_by_tag(tag(), json_rpc_named_arguments) ::
+          {:ok, non_neg_integer()} | {:error, reason :: :invalid_tag | :not_found | term()}
+  def fetch_zevm_block_number_by_tag(tag, json_rpc_named_arguments) when tag in ~w(earliest latest pending) do
+    %{id: 0, tag: tag}
+    |> Block.ZEvmByTag.request()
+    |> json_rpc(json_rpc_named_arguments)
+    |> Block.ZEvmByTag.number_from_result()
   end
 
   @doc """
@@ -357,6 +386,16 @@ defmodule EthereumJSONRPC do
         ) :: {:ok, %{logs: list(), receipts: list()}} | {:error, reason :: term}
   def fetch_transaction_receipts(transactions_params, json_rpc_named_arguments) when is_list(transactions_params) do
     Receipts.fetch(transactions_params, json_rpc_named_arguments)
+  end
+
+  @spec fetch_zevm_transaction_receipts(
+          [
+            %{required(:gas) => non_neg_integer(), required(:hash) => hash, optional(atom) => any}
+          ],
+          json_rpc_named_arguments
+        ) :: {:ok, %{logs: list(), receipts: list()}} | {:error, reason :: term}
+  def fetch_zevm_transaction_receipts(transactions_params, json_rpc_named_arguments) when is_list(transactions_params) do
+    Receipts.zevm_fetch(transactions_params, json_rpc_named_arguments)
   end
 
   @doc """

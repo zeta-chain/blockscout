@@ -227,6 +227,7 @@ defmodule Indexer.Fetcher.CoinBalance do
       |> Enum.sort()
       |> Enum.dedup()
 
+    # Getting timestamp, no need to add zevm blocks data
     Enum.reduce(block_numbers, %{}, fn block_number, map ->
       case EthereumJSONRPC.fetch_blocks_by_range(block_number..block_number, json_rpc_named_arguments) do
         {:ok, %Blocks{blocks_params: [%{timestamp: timestamp}]}} ->
