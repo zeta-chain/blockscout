@@ -77,7 +77,7 @@ defmodule Indexer.PendingTransactionsSanitizer do
              %{id: ind, method: "eth_getTransactionReceipt", params: [pending_tx_hash_str]}
              |> request()
              |> json_rpc(json_rpc_named_arguments) do
-        if result do
+        if result and Map.get(result, "blockHash") do
           block_hash = Map.get(result, "blockHash")
 
           if block_hash do
