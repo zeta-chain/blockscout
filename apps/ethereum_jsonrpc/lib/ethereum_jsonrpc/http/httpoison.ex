@@ -2,14 +2,46 @@ defmodule EthereumJSONRPC.HTTP.HTTPoison do
   @moduledoc """
   Uses `HTTPoison` for `EthereumJSONRPC.HTTP`
   """
-  require Logger
 
   alias EthereumJSONRPC.HTTP
 
   @behaviour HTTP
 
-  def contains_zevm_request(json) do
+  defp contains_zevm_request(json) do
     String.contains? Kernel.inspect(json) , "zevm"
+  end
+
+
+  defp is_error(res) do
+    case res do
+      {:ok, %HTTPoison.Response{body: body}} ->
+        String.contains? Kernel.inspect(body) , "error" # Response's body can contain an error such as method not found.
+
+        {:error, _error} ->
+          true
+    end
+
+  end
+
+  defp get_error(res) do
+    case res do
+      {:ok, %HTTPoison.Response{body: body}} ->
+        case String.contains? Kernel.inspect(body) , "error" do # Response's body can contain an error such as method not found.
+          true ->
+            {:ok, decoded} = Jason.decode(body)
+            decoded["error"]["message"]
+          false ->
+            nil
+        end
+
+        {:error, %HTTPoison.Error{reason: reason}} ->
+          reason
+    end
+  end
+
+  defp format_success_body_as_jsonrpc(res) do
+    {:ok, %HTTPoison.Response{body: body}} = res
+    "{\"jsonrpc\":\"2.0\", \"id\": 0, \"result\": #{body}}"
   end
 
   @impl HTTP
@@ -23,17 +55,15 @@ defmodule EthereumJSONRPC.HTTP.HTTPoison do
           {:error, reason}
       end
     else
-      # Custom rpc endpoints does not allow batch requests
+      # Custom zevm endpoints does not allow batch requests
       {:ok, list} = Jason.decode(json)
-
-      # todo (@Martin): fix this part.
 
       responses = Enum.map(list,
                         fn request -> (
-                          if (request[:method] != nil && String.contains? request[:method] , "zevm") do
-                            [path_param | _tail] = (if  is_map(request) && Map.has_key?(request, :params), do: request[:params], else: [])
-                            zevm_path = "zeta-chain/zevm/" <> request[:method] <> (if path_param != nil, do:  "/" <> path_param, else: "")
-                            zevm_url = (if (String.contains? request[:method] , "zevm"), do: String.replace(url, "evm", zevm_path), else: url)
+                          if (request["method"] != nil && String.contains? request["method"] , "zevm") do
+                            [path_param | _tail] = (if  is_map(request) && Map.has_key?(request, "params"), do: request["params"], else: [])
+                            zevm_path = "zeta-chain/zevm/" <> request["method"] <> (if path_param != nil, do:  "/" <> path_param, else: "")
+                            zevm_url = (if (String.contains? request["method"] , "zevm"), do: String.replace(url, "evm", zevm_path), else: url)
 
                             HTTPoison.get(zevm_url, [], options)
                           else
@@ -42,37 +72,17 @@ defmodule EthereumJSONRPC.HTTP.HTTPoison do
                         ) end)
 
       successes = responses
-                    |> Enum.filter(fn res -> case res do
-                      {:ok, _other} ->
-                        true
-
-                      {:error, _other} ->
-                        false
-                    end end)
-                    |> Enum.map(fn res ->
-                      {:ok, %HTTPoison.Response{body: body}} = res
-                      body end)
+                    |> Enum.filter(fn res -> !is_error(res) end)
+                    |> Enum.map(fn res -> format_success_body_as_jsonrpc(res) end)
 
       errors = responses
-                |> Enum.filter(fn res -> case res do
-                  {:ok, _other} ->
-                    false
-
-                  {:error, _other} ->
-                    true
-                end  end)
-                |> Enum.map(fn res ->
-                  {:error, %HTTPoison.Error{reason: reason}} = res
-                    reason end)
-
-      Logger.info "responses " <> inspect(responses)
-      Logger.info "successes " <> inspect(successes)
-      Logger.info "errors " <> inspect(errors)
+                |> Enum.filter(fn res -> is_error(res) end)
+                |> Enum.map(fn res -> get_error(res) end)
 
       if length(errors) > 0 do
         {:error, errors}
       else
-        {:ok, %{body: responses, status_code: 200}}
+        {:ok, %{body: "[#{Enum.join(successes, ",")}]", status_code: 200}}
       end
     end
   end
