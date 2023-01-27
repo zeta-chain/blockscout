@@ -501,6 +501,15 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
               transaction_receipt_from_node =
                 fetch_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments)
 
+              transaction_receipt_from_node = if (
+                elem(transaction_receipt_from_node, 0) != :ok
+                or length(elem(transaction_receipt_from_node,1)[:receipts]) == 0
+              ) do
+                  fetch_zevm_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments)
+                else
+                  transaction_receipt_from_node
+                end
+
               update_transactions_inner(
                 repo,
                 valid_internal_transactions,
@@ -526,6 +535,15 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
             true ->
               transaction_receipt_from_node =
                 fetch_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments)
+
+              transaction_receipt_from_node = if (
+                elem(transaction_receipt_from_node, 0) != :ok
+                or length(elem(transaction_receipt_from_node,1)[:receipts]) == 0
+              ) do
+                  fetch_zevm_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments)
+                else
+                  transaction_receipt_from_node
+                end
 
               update_transactions_inner(
                 repo,
@@ -560,6 +578,32 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
   defp fetch_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments) do
     receipt_response =
       EthereumJSONRPC.fetch_transaction_receipts(
+        [
+          %{
+            :hash => to_string(transaction_hash),
+            :gas => 0
+          }
+        ],
+        json_rpc_named_arguments
+      )
+
+    case receipt_response do
+      {:ok,
+       %{
+         :receipts => [
+           receipt
+         ]
+       }} ->
+        receipt
+
+      _ ->
+        %{:cumulative_gas_used => nil}
+    end
+  end
+
+  defp fetch_zevm_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments) do
+    receipt_response =
+      EthereumJSONRPC.fetch_zevm_transaction_receipts(
         [
           %{
             :hash => to_string(transaction_hash),

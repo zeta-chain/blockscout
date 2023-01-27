@@ -102,6 +102,19 @@ function onTransactionHash (txHash, functionName) {
           openSuccessModal('Success', successMsg)
           clearInterval(txReceiptPollingIntervalId)
         }
+      }).catch(error => {
+        console.log(error)
+        window.ethereum.request({
+          method: 'zevm_getTransactionReceipt',
+          params: [txHash]
+        })
+          .then(txReceipt => {
+            if (txReceipt) {
+              const successMsg = `Successfully sent <a href="/tx/${txHash}">transaction</a> for method "${functionName}"`
+              openSuccessModal('Success', successMsg)
+              clearInterval(txReceiptPollingIntervalId)
+            }
+          })
       })
   }
   const txReceiptPollingIntervalId = setInterval(() => { getTxReceipt(txHash) }, 5 * 1000)

@@ -21,6 +21,7 @@ defmodule Explorer.ChainSpec.Geth.Importer do
 
     json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
 
+    # Getting timestamp, no need to add zevm blocks data
     {:ok, %Blocks{blocks_params: [%{timestamp: timestamp}]}} =
       EthereumJSONRPC.fetch_blocks_by_range(1..1, json_rpc_named_arguments)
 
